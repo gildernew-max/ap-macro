@@ -233,10 +233,39 @@ ul.blist li::before{content:'›';position:absolute;left:0;color:var(--mut)}
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
-const MODEL   = 'claude-sonnet-4-20250514';
-const PALETTE = ['#f0c040','#4fc3f7','#a78bfa','#34d399','#fb7185','#c084fc','#ff8c42'];
-const AC      = ['#f0c040','#4fc3f7','#a78bfa','#34d399','#fb7185','#c084fc'];
-const ac      = i => AC[i % AC.length];
+const MODEL        = 'claude-sonnet-4-20250514';
+const PALETTE      = ['#f0c040','#4fc3f7','#a78bfa','#34d399','#fb7185','#c084fc','#ff8c42'];
+const AC           = ['#f0c040','#4fc3f7','#a78bfa','#34d399','#fb7185','#c084fc'];
+const ac           = i => AC[i % AC.length];
+const AP_EXAM_DATE = new Date('2026-05-07T08:00:00'); // single source of truth
+const AXIE_DURATION = 3500; // ms — matches axisSay display time; queue derives from this
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MESSAGE QUEUE — sequential Axie messaging, no collision
+// Only level-up, streak milestones, and adaptive pressure use axieEnqueue.
+// Everything else (quiz feedback, taps, one-shots) calls axisSay directly.
+// ─────────────────────────────────────────────────────────────────────────────
+const axieQ = { msgs: [], busy: false, _at: null };
+
+function axieEnqueue(msg) {
+  axieQ.msgs.push(msg);
+  axieFlush();
+}
+
+function axieFlush() {
+  if (axieQ.busy || !axieQ.msgs.length) return;
+  axieQ.busy = true;
+  axieSay(axieQ.msgs.shift());
+  setTimeout(() => { axieQ.busy = false; axieFlush(); }, AXIE_DURATION); // same duration, no drift
+}
+
+function axieAfterQueue(cb) {
+  const check = () => {
+    if (!axieQ.busy && axieQ.msgs.length === 0) cb();
+    else setTimeout(check, 100);
+  };
+  setTimeout(check, 100);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
@@ -253,16 +282,21 @@ const state = {
   apiKey:   '',
   accent:   '#f0c040',
   sessions: [],
-  xp: { xp:0, lv:1, streak:0, last:'', sess:0, cards:0, quizzes:0 },
+  xp:   { xp:0, lv:1, streak:0, last:'', sess:0, cards:0, quizzes:0 },
+  perf: {},       // { [unitId]: { correct, total, ignored, topics: { [topic]: { correct, total } } } }
 
   // navigation
-  page:   'home',   // 'home' | 'new' | 'study' | 'unit' | 'tx'
-  htab:   'sessions',
-  tab:    'visual',
-  unitId: 1,        // active unit id when page==='unit'
-  curIdx: -1,       // index into sessions[]
+  page:      'home',
+  _setupErr: '',
+  htab:      'sessions',
+  tab:       'visual',
+  unitId:    1,
+  curIdx:    -1,
+  focusUnit: null,  // unitId flagged by prediction — drives visual bias on unit tiles
+  lastDrill: 0,     // timestamp — gates 10-min auto-drill cooldown
 
   // per-session interaction
+  axIdx:     0,
   fcIdx:     0,
   fcFlipped: false,
   picks:     {},
@@ -279,26 +313,45 @@ const cur = () => state.sessions[state.curIdx] ?? null;
 
 // Load persisted state from localStorage (called once at init)
 function loadState() {
-  state.apiKey  = localStorage.getItem('apex-key')     || '';
-  state.accent  = localStorage.getItem('apex-accent')  || '#f0c040';
-  state.sessions = (JSON.parse(localStorage.getItem('apex-sessions') || '[]'))
+  state.apiKey    = localStorage.getItem('apex-key')      || '';
+  state.accent    = localStorage.getItem('apex-accent')   || '#f0c040';
+  state.sessions  = (JSON.parse(localStorage.getItem('apex-sessions') || '[]'))
     .map(s => s.unit ? s : { ...s, unit: detectUnit(s) });
   const saved = JSON.parse(localStorage.getItem('apex-xp') || 'null');
   if (saved) state.xp = saved;
-  state.qIdx = Math.floor(Math.random() * QUOTES.length);
-  // Apply accent CSS variable immediately (no DOM update yet)
+  state.perf      = JSON.parse(localStorage.getItem('apex-perf') || '{}');
+  state.lastDrill = parseInt(localStorage.getItem('apex-lastdrill') || '0');
+  state.qIdx      = Math.floor(Math.random() * QUOTES.length);
   document.documentElement.style.setProperty('--accent', state.accent);
   document.documentElement.style.setProperty('--c1',     state.accent);
 }
 
-function persistSessions() { localStorage.setItem('apex-sessions', JSON.stringify(state.sessions)); }
-function persistXP()       { localStorage.setItem('apex-xp',       JSON.stringify(state.xp)); }
+function persistSessions()  { localStorage.setItem('apex-sessions',   JSON.stringify(state.sessions)); }
+function persistXP()        { localStorage.setItem('apex-xp',         JSON.stringify(state.xp)); }
+function persistPerf()      { localStorage.setItem('apex-perf',        JSON.stringify(state.perf)); }
+function persistLastDrill() { localStorage.setItem('apex-lastdrill',   String(state.lastDrill)); }
+
+function updateCurSession(patch) {
+  if (state.curIdx < 0) return; // guard: invalid index
+  state.sessions[state.curIdx] = { ...state.sessions[state.curIdx], ...patch };
+  persistSessions();
+}
+
+// FIX B: extracted from inline template string in renderSessions
+function resetApiKey() {
+  if (!confirm('Reset API key?')) return;
+  localStorage.removeItem('apex-key');
+  state.apiKey   = '';
+  state.page     = 'setup';
+  state._setupErr = '';
+  render();
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RENDER  — the only function that writes to #app
 // ─────────────────────────────────────────────────────────────────────────────
 function render() {
-  renderHero(); // always refresh hero stats/countdown/xp
+  renderHero();
 
   switch (state.page) {
     case 'home':  return renderHome();
@@ -306,30 +359,33 @@ function render() {
     case 'study': return renderStudy();
     case 'unit':  return renderUnit();
     case 'tx':    return renderTx();
-    case 'setup': return renderSetup();
+    // FIX C: setup now goes through render() — consumes _setupErr
+    case 'setup': return renderSetup(state._setupErr);
   }
 }
 
-// Write HTML to #app and (re)inject quote footer
 function setApp(html) {
   $('app').innerHTML = html;
   injectQuote();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HERO  — renders into static elements outside #app
+// HERO
 // ─────────────────────────────────────────────────────────────────────────────
 function renderHero() {
-  const cd  = countdown();
-  const pct = Math.min(100, Math.round(state.xp.xp / xpNeeded(state.xp.lv) * 100));
-  const urg = cd.d < 7 ? 'var(--c5)' : cd.d < 21 ? 'var(--c7)' : cd.d < 60 ? 'var(--accent)' : 'var(--c4)';
+  const cd       = countdown();
+  const G        = state.xp;
+  const realPct  = Math.round(G.xp / xpNeeded(G.lv) * 100);
+  const pct      = Math.min(95, realPct); // cap at 95% — "almost there" illusion
+  const urg      = cd.d < 7 ? 'var(--c5)' : cd.d < 21 ? 'var(--c7)' : cd.d < 60 ? 'var(--accent)' : 'var(--c4)';
+  const bonusTxt = G.streak >= 2 ? ` · 🔥 +${Math.round(G.streak*5)}% XP` : '';
 
   const statsEl = $('stats');
   if (statsEl) statsEl.innerHTML =
-    `<div class="stat">🔥 <b>${state.xp.streak}</b> day streak</div>
-     <div class="stat">⭐ Level <b>${state.xp.lv}</b></div>
+    `<div class="stat">🔥 <b>${G.streak}</b> day streak</div>
+     <div class="stat">⭐ <b>${getTier(G.lv)}</b> · Lv ${G.lv}</div>
      <div class="stat">📚 <b>${state.sessions.length}</b> sessions</div>
-     <div class="stat">🃏 <b>${state.xp.cards}</b> cards reviewed</div>`;
+     <div class="stat">🃏 <b>${G.cards}</b> cards reviewed</div>`;
 
   const cdEl = $('cd');
   if (cdEl) cdEl.innerHTML = cd.done
@@ -338,69 +394,310 @@ function renderHero() {
        <div class="cd-div"></div>
        <div class="cd-block"><div class="cd-num" style="color:${urg};font-size:22px">${cd.h}h</div><div class="cd-lbl">hours</div></div>
        <div class="cd-div"></div>
-       <div class="cd-info">until <strong style="color:var(--txt)">AP Macro Exam</strong><br><span style="font-size:11px;color:var(--mut)">May 7, 2026 · 8:00 AM</span></div>
+       <div class="cd-info">until <strong style="color:var(--txt)">AP Macro Exam</strong><br><span style="font-size:11px;color:var(--mut)">${AP_EXAM_DATE.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})} · 8:00 AM</span></div>
        <div class="cd-swatches">${PALETTE.map(c =>
          `<div class="swatch${c === state.accent ? ' on' : ''}" style="background:${c}" onclick="setAccent('${c}')"></div>`
        ).join('')}</div>`;
 
   const xpEl = $('xp');
   if (xpEl) xpEl.innerHTML =
-    `<div class="xp-top"><span>XP — Level ${state.xp.lv}</span><span>${state.xp.xp} / ${xpNeeded(state.xp.lv)}</span></div>
+    `<div class="xp-top"><span>${getTier(G.lv)} · Level ${G.lv}${bonusTxt}</span><span>${G.xp} / ${xpNeeded(G.lv)}</span></div>
      <div class="xp-track"><div class="xp-fill" style="width:${pct}%;background:linear-gradient(90deg,${state.accent},#ff9f40)"></div></div>`;
+
+  // ── STREAK RISK: fires once per load if not studied today ──
+  if (G.last !== new Date().toDateString() && G.streak > 0) {
+    if (!window._streakWarnFired) {
+      window._streakWarnFired = true;
+      setTimeout(() => axieSay('⚠️ Your streak is at risk — 1 session saves it'), 1200);
+    }
+  } else {
+    window._streakWarnFired  = false;
+    window._pressureFired    = false; // reset pressure gate when streak is safe
+  }
+
+  // ── ADAPTIVE PRESSURE: one message per load, priority-ordered ──
+  renderAdaptivePressure();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ACCENT / XP / STREAK  — simple state mutators
+// ACCENT / XP / STREAK
 // ─────────────────────────────────────────────────────────────────────────────
 function setAccent(c) {
   state.accent = c;
   localStorage.setItem('apex-accent', c);
   document.documentElement.style.setProperty('--accent', c);
   document.documentElement.style.setProperty('--c1',     c);
-  renderHero(); // partial re-render — hero only
+  renderHero();
 }
 
 const xpNeeded = l => l * 120;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// BEHAVIORAL ENGINE — tier, bonus, momentum, adaptive pressure
+// ─────────────────────────────────────────────────────────────────────────────
+function getTier(lv) {
+  if (lv < 3)  return 'Apprentice';
+  if (lv < 6)  return 'Strategist';
+  if (lv < 10) return 'Analyst';
+  return 'Macro Master';
+}
+
+function streakBonus(streak) {
+  return Math.min(1 + (streak * 0.05), 1.5); // caps at +50% (30-day streak)
+}
+
+function sessionsToday() {
+  const td = new Date().toDateString();
+  return state.sessions.filter(s => new Date(s.date).toDateString() === td).length;
+}
+
+function normTopic(t) {
+  return t?.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'') || null;
+}
+
+const UNIT_TOPICS = {
+  1: ['scarcity','opportunity_cost','ppc','comparative_advantage','supply_demand'],
+  2: ['gdp','unemployment','inflation_cpi','business_cycle','gdp_deflator'],
+  3: ['asad_model','fiscal_policy','multiplier_effect','automatic_stabilizers','output_gaps'],
+  4: ['money_supply','t_accounts','money_multiplier','fed_tools','loanable_funds'],
+  5: ['phillips_curve','crowding_out','quantity_theory','long_run_growth','stagflation'],
+  6: ['exchange_rates','balance_of_payments','forex_market','interest_rate_chain','net_exports'],
+};
+
+function getUnitProfile() {
+  const profile = {};
+  for (const u of UNITS) {
+    const unitSessions = state.sessions.filter(s => s.unit?.id === u.id);
+    const perf         = state.perf[u.id];
+    const avgScore     = perf?.total > 0
+      ? perf.correct / perf.total
+      : unitSessions.length && unitSessions[0].instructorGrade
+        ? unitSessions[0].instructorGrade.score / 100
+        : null;
+    const lastStudied  = unitSessions.length
+      ? Math.max(...unitSessions.map(s => new Date(s.date).getTime()))
+      : null;
+    const daysSince    = lastStudied
+      ? Math.floor((Date.now() - lastStudied) / 86400000)
+      : Infinity;
+    const wm           = u.ex.match(/(\d+)[–-](\d+)/);
+    const weight       = wm ? (parseInt(wm[1]) + parseInt(wm[2])) / 2 : 15;
+    const scoreSignal  = avgScore != null ? (1 - avgScore) : 0.5;
+    const urgency      = scoreSignal * (weight / 10) + (Math.min(daysSince, 30) / 45);
+    profile[u.id] = {
+      id:u.id, lbl:u.lbl, col:u.col, em:u.em, ex:u.ex, weight,
+      sessions:unitSessions.length, avgScore, daysSince, urgency,
+      ignored: perf?.ignored ?? 0,
+    };
+  }
+  return profile;
+}
+
+function getWeakestUnit() {
+  const profile = Object.values(getUnitProfile());
+  const unstudied = profile.filter(u => u.sessions === 0);
+  if (unstudied.length) return unstudied.sort((a,b) => b.weight - a.weight)[0];
+  return profile.sort((a,b) => b.urgency - a.urgency)[0];
+}
+
+function getWeakTopics(unitId) {
+  const topics = state.perf[unitId]?.topics;
+  if (!topics) return [];
+  return Object.entries(topics)
+    .filter(([,v]) => v.total >= 3 && (v.correct / v.total) < 0.6)
+    .map(([k,v]) => ({ topic:k, label:k.replace(/_/g,' '), score:v.correct/v.total, total:v.total }))
+    .sort((a,b) => a.score - b.score);
+}
+
+function getWeakestTopic() {
+  let worst = null;
+  for (const u of UNITS) {
+    const weak = getWeakTopics(u.id);
+    if (!weak.length) continue;
+    const top = weak[0];
+    if (!worst || top.score < worst.score) worst = { ...top, unitId:u.id, unitLbl:u.lbl };
+  }
+  return worst;
+}
+
+function renderAdaptivePressure() {
+  if (window._pressureFired) return;
+  window._pressureFired = true;
+
+  const G         = state.xp;
+  const COOLDOWN  = 1000 * 60 * 10;
+  const weakTopic = getWeakestTopic();
+
+  // ── PREDICTIVE: topic-level, highest priority ──
+  if (weakTopic && weakTopic.score < 0.5) {
+    state.focusUnit = weakTopic.unitId;
+    setTimeout(() => {
+      axieEnqueue(`⚠️ You're likely to miss ${weakTopic.label} questions — ${Math.round(weakTopic.score*100)}% correct so far.`);
+      if (Date.now() - (state.lastDrill || 0) < COOLDOWN) {
+        axieEnqueue(`→ Do one session on ${weakTopic.label} to clear this.`);
+      } else {
+        axieEnqueue(`→ Pulling up a quick drill now.`);
+        axieAfterQueue(() => {
+          state.lastDrill = Date.now();
+          persistLastDrill();
+          launchDrill(weakTopic.unitId, weakTopic.topic);
+        });
+      }
+    }, 1800);
+    return;
+  }
+
+  const weakest = getWeakestUnit();
+  const p       = weakest ? getUnitProfile()[weakest.id] : null;
+
+  if (!weakest || state.sessions.length < 2) {
+    if (G.streak >= 3) {
+      setTimeout(() => axieSay(
+        G.streak >= 7
+          ? `📈 ${G.streak} days straight. Most people quit by now.`
+          : `📊 ${G.streak}-day streak — you're building something real.`
+      ), 2000);
+    } else if (Math.random() < 0.2) {
+      setTimeout(() => axieSay("🧠 Most students skip this part. You're not most students."), 3500);
+    }
+    return;
+  }
+
+  let msg = null, delay = 1800, followUp = null;
+
+  if (p.sessions === 0) {
+    if (p.ignored === 0)      { msg = `📌 You haven't touched ${p.em} Unit ${p.id} yet — it's ${p.ex} of the exam.`; followUp = `→ One session on Unit ${p.id} fixes this today.`; }
+    else if (p.ignored === 1) { msg = `📌 Unit ${p.id} is still untouched. That gap is growing.`; followUp = `→ Do one session on Unit ${p.id} right now.`; }
+    else                      { msg = `🚨 You're actively avoiding Unit ${p.id} (${p.lbl}). That's dangerous.`; followUp = `→ Unit ${p.id} is ${p.ex} of the exam. This is the one.`; }
+    if (!state.perf[weakest.id]) state.perf[weakest.id] = { correct:0, total:0, ignored:0, topics:{} };
+    state.perf[weakest.id].ignored++; persistPerf();
+
+  } else if (p.avgScore != null && p.avgScore < 0.7) {
+    if (p.ignored === 0)      { msg = `⚠️ Unit ${p.id} (${p.lbl}) is your weakest — ${Math.round(p.avgScore*100)}% avg. That's fixable.`; followUp = `→ Do one session on Unit ${p.id} today.`; }
+    else if (p.ignored === 1) { msg = `⚠️ Unit ${p.id} is still your weakest. This is starting to matter.`; followUp = `→ One focused session changes this number.`; }
+    else                      { msg = `🚨 You're avoiding Unit ${p.id} (${p.lbl}). Real risk before the exam.`; followUp = `→ This is the one. Do it now.`; }
+    if (!state.perf[weakest.id]) state.perf[weakest.id] = { correct:0, total:0, ignored:0, topics:{} };
+    state.perf[weakest.id].ignored++; persistPerf();
+
+  } else if (p.daysSince >= 4) {
+    msg = `📅 Unit ${p.id} was ${p.daysSince} days ago. AP exams don't forget.`;
+    followUp = `→ A quick review session keeps it sharp.`;
+
+  } else if (G.streak >= 3) {
+    msg = G.streak >= 7
+      ? `📈 ${G.streak} days straight. Most people quit by now.`
+      : `📊 ${G.streak}-day streak — you're building something real.`;
+    delay = 2000;
+
+  } else if (Math.random() < 0.2) {
+    msg = "🧠 Most students skip this part. You're not most students.";
+    delay = 3500;
+  }
+
+  if (msg) {
+    setTimeout(() => {
+      axieEnqueue(msg);
+      if (followUp) axieEnqueue(followUp);
+    }, delay);
+  }
+}
+
+function renderHeroFullBar() {
+  const G    = state.xp;
+  const xpEl = $('xp');
+  if (!xpEl) return;
+  xpEl.innerHTML =
+    `<div class="xp-top"><span>${getTier(G.lv)} · Level ${G.lv}</span><span style="color:var(--accent)">LEVEL UP</span></div>
+     <div class="xp-track"><div class="xp-fill" style="width:100%;background:linear-gradient(90deg,${state.accent},#ff9f40)"></div></div>`;
+  setTimeout(() => renderHero(), 400);
+}
+
 function addXP(pts, msg) {
-  state.xp.xp += pts;
-  while (state.xp.xp >= xpNeeded(state.xp.lv)) {
-    state.xp.xp -= xpNeeded(state.xp.lv);
-    state.xp.lv++;
+  const G        = state.xp;
+  const streak   = streakBonus(G.streak);
+  const count    = sessionsToday();
+  const momentum = Math.min(1 + (count - 1) * 0.1, 1.4);
+  const actual   = Math.round(pts * streak * momentum);
+  G.xp += actual;
+
+  const parts = [`+${actual} XP  ${msg}`];
+  if (G.streak >= 2) parts.push(`🔥 +${Math.round((streak-1)*100)}% streak`);
+  if (momentum > 1)  parts.push(`⚡ +${Math.round((momentum-1)*100)}% momentum`);
+  showToast(parts.join('  '));
+
+  let leveled = false;
+  while (G.xp >= xpNeeded(G.lv)) {
+    G.xp -= xpNeeded(G.lv);
+    G.lv++;
+    leveled = true;
+  }
+  if (leveled) {
+    renderHeroFullBar();
+    setTimeout(() => {
+      launchConfetti();
+      const messages = {
+        'Apprentice':   `🏆 Apprentice — you're building the habit. Keep going.`,
+        'Strategist':   `🏆 Strategist — you're ahead of where you should be.`,
+        'Analyst':      `🏆 Analyst — this is where most people stall. You didn't.`,
+        'Macro Master': `🏆 Macro Master — you're in rare company now.`,
+      };
+      axieEnqueue(messages[getTier(G.lv)]);
+    }, 400);
   }
   persistXP();
-  showToast(`+${pts} XP  ${msg}`);
-  renderHero();
+  if (!leveled) renderHero();
 }
 
 function checkStreak() {
-  const td = new Date().toDateString();
-  const yd = new Date(Date.now() - 86400000).toDateString();
+  const td  = new Date().toDateString();
+  const yd  = new Date(Date.now() - 86400000).toDateString();
   if (state.xp.last === td) return;
-  state.xp.streak = state.xp.last === yd ? state.xp.streak + 1 : 1;
-  state.xp.last   = td;
+  const wasStreak  = state.xp.streak;
+  const continued  = state.xp.last === yd;
+  state.xp.streak  = continued ? state.xp.streak + 1 : 1;
+  state.xp.last    = td;
+  if (!continued && wasStreak > 0) {
+    setTimeout(() => axieSay("⚠️ You almost lost it. Reset — but you're back."), 800);
+  } else if ([3, 7, 14].includes(state.xp.streak)) {
+    setTimeout(() => {
+      launchConfetti();
+      axieEnqueue(`🔥 ${state.xp.streak}-day streak! You're locked in.`);
+    }, 150);
+  }
   persistXP();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NAVIGATION  — mutates state.page then calls render()
+// NAVIGATION
 // ─────────────────────────────────────────────────────────────────────────────
-function goHome(htab)  { state.page = 'home';  if (htab) state.htab = htab; render(); }
+function goHome(htab) {
+  if (state.page === 'study') {
+    setTimeout(() => axieSay('⚡ One more session = +2x momentum'), 800);
+  }
+  state.page = 'home';
+  if (htab) state.htab = htab;
+  render();
+}
 function goNew()       { state.page = 'new';   render(); }
 function goStudy(idx)  { state.page = 'study'; state.curIdx = idx; resetSession(); render(); }
-function goUnit(id)    { state.page = 'unit';  state.unitId = id;  render(); }
+function goUnit(id) {
+  if (state.focusUnit === id) state.focusUnit = null; // acted on — clear visual bias
+  state.page   = 'unit';
+  state.unitId = id;
+  render();
+}
 function goTx()        { state.page = 'tx';    render(); }
 
 function resetSession() {
-  state.tab      = 'visual';
-  state.fcIdx    = 0;
+  state.tab       = 'visual';
+  state.fcIdx     = 0;
   state.fcFlipped = false;
-  state.picks    = {};
-  state.checked  = {};
-  state.chatH    = [];
-  state.mcqP     = {};
-  state.qScore   = 0;
-  state.qTotal   = 0;
+  state.picks     = {};
+  state.checked   = {};
+  state.chatH     = [];
+  state.mcqP      = {};
+  state.qScore    = 0;
+  state.qTotal    = 0;
 }
 
 function jumpUnit(id) {
@@ -412,7 +709,7 @@ function jumpUnit(id) {
 // UTILITIES
 // ─────────────────────────────────────────────────────────────────────────────
 function countdown() {
-  const diff = new Date('2026-05-07T08:00:00') - new Date();
+  const diff = AP_EXAM_DATE - new Date();
   if (diff <= 0) return { d:0, h:0, done:true };
   return { d: Math.floor(diff / 86400000), h: Math.floor((diff % 86400000) / 3600000), done:false };
 }
@@ -429,7 +726,7 @@ function launchConfetti() {
     el.style.cssText = `left:${Math.random()*100}vw;background:${cols[Math.floor(Math.random()*cols.length)]};transform:rotate(${Math.random()*360}deg);animation-duration:${1.4+Math.random()*2}s;animation-delay:${Math.random()*.6}s`;
     document.body.appendChild(el); setTimeout(() => el.remove(), 3800);
   }
-  axieSay('🎉 PERFECT! You absolutely crushed it!');
+  // callers own their messages — no axieSay here
 }
 
 function ring(pct, col, sz = 38) {
@@ -463,25 +760,24 @@ function toggleNotion() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AXIE
+// AXIE — FIX A: state.axIdx replaces top-level `let _axIdx`
 // ─────────────────────────────────────────────────────────────────────────────
 const AXIE_LINES = [
   "Hoot! You're on a roll 🎓","Every card = more confidence! ⚡","AP 5 incoming! 🏆",
   "Owl believe in you always 🦉","Economics is actually fun — I promise 🤓",
   "You're smarter than yesterday 🧠","Great job showing up today! ✨"
 ];
-let _axIdx = 0;
 
 function axieTap() {
   const m = $('axie-msg'); if (!m) return;
-  m.textContent = AXIE_LINES[_axIdx++ % AXIE_LINES.length];
-  m.classList.add('on'); clearTimeout(window._at);
-  window._at = setTimeout(() => m.classList.remove('on'), 3200);
+  m.textContent = AXIE_LINES[state.axIdx++ % AXIE_LINES.length];
+  m.classList.add('on'); clearTimeout(axieQ._at);
+  axieQ._at = setTimeout(() => m.classList.remove('on'), AXIE_DURATION);
 }
 function axieSay(msg) {
   const m = $('axie-msg'); if (!m) return;
-  m.textContent = msg; m.classList.add('on'); clearTimeout(window._at);
-  window._at = setTimeout(() => m.classList.remove('on'), 3500);
+  m.textContent = msg; m.classList.add('on'); clearTimeout(axieQ._at);
+  axieQ._at = setTimeout(() => m.classList.remove('on'), AXIE_DURATION);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -568,7 +864,13 @@ function detectUnit(s) {
 // API
 // ─────────────────────────────────────────────────────────────────────────────
 async function callClaude(msgs, sys) {
-  if (!state.apiKey) { renderSetup('Enter your API key to continue.'); throw new Error('no-key'); }
+  if (!state.apiKey) {
+    // FIX C: route through render() instead of calling renderSetup() directly
+    state.page     = 'setup';
+    state._setupErr = 'Enter your API key to continue.';
+    render();
+    throw new Error('no-key');
+  }
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'content-type':'application/json', 'x-api-key':state.apiKey, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' },
@@ -576,8 +878,11 @@ async function callClaude(msgs, sys) {
   });
   if (r.status === 401) {
     localStorage.removeItem('apex-key');
-    state.apiKey = '';
-    renderSetup('❌ Invalid API key — please re-enter from console.anthropic.com');
+    state.apiKey    = '';
+    // FIX C: route through render() instead of calling renderSetup() directly
+    state.page      = 'setup';
+    state._setupErr = '❌ Invalid API key — please re-enter from console.anthropic.com';
+    render();
     throw new Error('401');
   }
   if (!r.ok) throw new Error(`API ${r.status}: ${(await r.text()).slice(0, 200)}`);
@@ -588,8 +893,9 @@ async function callClaude(msgs, sys) {
 // PAGE RENDERERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-// SETUP
+// SETUP — FIX C: only called via render(); clears _setupErr after consuming it
 function renderSetup(err = '') {
+  state._setupErr = ''; // consume so it doesn't persist across re-renders
   setApp(`<div class="setup fadein">
     <div style="text-align:center;margin-bottom:24px">
       <svg width="64" height="64" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
@@ -642,7 +948,6 @@ function renderHome() {
 }
 
 function renderHomeContent() {
-  // Update tab highlighting
   document.querySelectorAll('.tab').forEach((b, i) =>
     b.classList.toggle('on', (i===0 && state.htab==='sessions') || (i===1 && state.htab==='units')));
   const el = $('hcontent'); if (!el) return;
@@ -687,8 +992,9 @@ function renderSessions() {
     </div>`).join('');
   }
 
+  // FIX B: inline localStorage call replaced with resetApiKey() function call
   out += `<div style="margin-top:36px;text-align:center;padding-top:16px;border-top:1px solid var(--bdr)">
-    <button class="btn" style="font-size:11px;color:var(--mut);border-color:transparent" onclick="if(confirm('Reset API key?')){localStorage.removeItem('apex-key');state.apiKey='';renderSetup();}">Change API key</button>
+    <button class="btn" style="font-size:11px;color:var(--mut);border-color:transparent" onclick="resetApiKey()">Change API key</button>
   </div>`;
   return out;
 }
@@ -701,7 +1007,7 @@ function renderUnitTiles() {
   <div class="ugrid">${UNITS.map(u => {
     const cnt = state.sessions.filter(s => s.unit?.id === u.id).length;
     const pct = upct(u.id);
-    return `<div class="utile scalein" onclick="goUnit(${u.id})">
+    return `<div class="utile scalein" onclick="goUnit(${u.id})" style="${state.focusUnit === u.id ? `box-shadow:0 0 0 2px ${u.col},0 0 18px ${u.col}40;` : ``}">
       <div style="position:absolute;top:0;left:0;right:0;height:3px;background:${u.col};border-radius:8px 8px 0 0"></div>
       <div class="utile-ghost" style="color:${u.col}">0${u.id}</div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
@@ -789,18 +1095,25 @@ async function doGen() {
   $('gb').disabled = true; $('gl').style.display = 'flex'; $('ge').textContent = '';
   try {
     const sys = `You are an expert AP Macroeconomics tutor. Given a lecture transcript, respond ONLY with valid JSON — no markdown fences:
-{"title":"concise title","summary":"2-3 sentence plain-English summary","instructorGrade":{"score":85,"rationale":"2-3 honest sentences. Score 1-100: clarity (40pts), examples (20pts), AP coverage (20pts), engagement (20pts)."},"studyGuide":{"keyTakeaways":["...","...","...","..."],"sections":[{"title":"Section Title","cards":[{"label":"label","title":"Card Title","bullets":["point with **bold** terms"]},{"label":"label","title":"Card Title","text":"prose with **bold** terms"}],"formulas":[{"eq":"formula","label":"what it means"}]}],"formulas":[{"eq":"formula","label":"description"}]},"flashcards":[{"term":"...","definition":"...","example":"..."}],"quiz":[{"question":"...","options":["A) ...","B) ...","C) ...","D) ..."],"answer":"A","explanation":"..."}],"resources":[{"name":"...","url":"...","why":"..."}]}
+{"title":"concise title","summary":"2-3 sentence plain-English summary","instructorGrade":{"score":85,"rationale":"2-3 honest sentences. Score 1-100: clarity (40pts), examples (20pts), AP coverage (20pts), engagement (20pts)."},"studyGuide":{"keyTakeaways":["...","...","...","..."],"sections":[{"title":"Section Title","cards":[{"label":"label","title":"Card Title","bullets":["point with **bold** terms"]},{"label":"label","title":"Card Title","text":"prose with **bold** terms"}],"formulas":[{"eq":"formula","label":"what it means"}]}],"formulas":[{"eq":"formula","label":"description"}]},"flashcards":[{"term":"...","definition":"...","example":"..."}],"quiz":[{"question":"...","options":["A) ...","B) ...","C) ...","D) ..."],"answer":"A","explanation":"...","topic":"snake_case_topic"}],"resources":[{"name":"...","url":"...","why":"..."}]}
 Rules: 2-3 sections, 2-3 cards each. 4 takeaways. 3-5 global formulas. 6 flashcards. 5 quiz questions (answer=single letter). 3 resources.`;
     const raw    = await callClaude([{ role:'user', content:`Transcript:\n${tx.slice(0,6000)}` }], sys);
     const parsed = JSON.parse(raw.replace(/^```json|^```|```$/gm,'').trim());
-    const s      = { id:Date.now(), date:new Date().toLocaleDateString(), transcript:tx, ...parsed };
+    const s      = { id:Date.now(), date:new Date().toISOString(), transcript:tx, ...parsed };
     s.unit = detectUnit(s);
     state.sessions.unshift(s);
     persistSessions();
     checkStreak();
     state.xp.sess++;
-    addXP(50, 'New session! 🎉');
-    axieSay('New session ready! Time to study 🦉');
+    persistXP(); // FIX E: persist sess count immediately
+    addXP(50, 'New session!');
+    launchConfetti();
+    const todayCount = sessionsToday();
+    if (todayCount >= 2) {
+      setTimeout(() => axieSay(`⚡ ${todayCount} sessions today — momentum active. XP boosted.`), 900);
+    } else {
+      setTimeout(() => axieSay('🔥 New session unlocked — let\'s go!'), 400);
+    }
     goStudy(0);
   } catch (err) {
     if (err.message !== '401' && err.message !== 'no-key') { $('ge').textContent = 'Error: ' + err.message; }
@@ -808,7 +1121,7 @@ Rules: 2-3 sections, 2-3 cards each. 4 takeaways. 3-5 global formulas. 6 flashca
   }
 }
 
-// STUDY — renders the study session page
+// STUDY
 const TABS = [['visual','Visual'],['flashcards','Flashcards'],['quiz','Quiz'],['apexam','AP Exam'],['gaps','Gaps'],['chat','Q&A'],['resources','Resources']];
 
 function renderStudy() {
@@ -1007,12 +1320,30 @@ function pickQ(qi, l) {
 }
 
 function checkQ(qi, correct, enc) {
-  state.checked[qi]=true;
-  const ch=state.picks[qi], ok=ch===correct;
+  state.checked[qi] = true;
+  const ch = state.picks[qi], ok = ch === correct;
+
+  // ── TOPIC PERFORMANCE TRACKING ──
+  const s   = cur();
+  const uid = s?.unit?.id;
+  if (uid != null) {
+    if (!state.perf[uid]) state.perf[uid] = { correct:0, total:0, ignored:0, topics:{} };
+    const p = state.perf[uid];
+    p.total++; if (ok) p.correct++;
+    const topic = normTopic(s.quiz?.[qi]?.topic);
+    if (topic) {
+      if (!p.topics[topic]) p.topics[topic] = { correct:0, total:0 };
+      p.topics[topic].total++; if (ok) p.topics[topic].correct++;
+    }
+    persistPerf();
+    // Reset ignored only on real demonstrated competence
+    if (p.total >= 5 && (p.correct / p.total) > 0.7) { p.ignored = 0; persistPerf(); }
+  }
+
   document.querySelectorAll(`[id^="op-${qi}-"]`).forEach((el,oi) => {
-    const x='ABCD'[oi];
-    if (x===correct)       { el.style.background='rgba(52,211,153,.09)'; el.style.borderColor='#34d399'; el.style.color='#34d399'; }
-    else if (x===ch && !ok){ el.style.background='rgba(251,113,133,.09)'; el.style.borderColor='#fb7185'; el.style.color='#fb7185'; }
+    const x = 'ABCD'[oi];
+    if (x===correct)        { el.style.background='rgba(52,211,153,.09)'; el.style.borderColor='#34d399'; el.style.color='#34d399'; }
+    else if (x===ch && !ok) { el.style.background='rgba(251,113,133,.09)'; el.style.borderColor='#fb7185'; el.style.color='#fb7185'; }
     el.classList.add('locked');
   });
   const b=$(`cb-${qi}`); if(b) b.style.display='none';
@@ -1054,9 +1385,8 @@ async function genAPX() {
     const s=cur();
     const raw=await callClaude([{role:'user',content:`Session: ${s.title}\nSummary: ${s.summary}\nTopics: ${(s.studyGuide?.sections||[]).map(x=>x.title).join(', ')}`}],sys);
     const parsed=JSON.parse(raw.replace(/^```json|^```|```$/gm,'').trim());
-    s.apExam=parsed;
-    state.sessions[state.curIdx]=s;
-    persistSessions();
+    // FIX D: use updateCurSession() instead of direct state.sessions[i] write
+    updateCurSession({ apExam: parsed });
     addXP(20,'AP Exam unlocked! 🎓');
     $('tc').innerHTML=renderAPXContent(parsed);
   } catch(err) {
@@ -1119,7 +1449,7 @@ function renderAPXContent(d) {
 
   return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:8px">
     <div><div class="lbl" style="color:var(--accent);margin-bottom:3px">Free Response Questions 📝</div><p style="font-size:12px;color:var(--mut)">Write your answer first, then reveal the model</p></div>
-    <button class="btn" onclick="cur().apExam=null;state.sessions[state.curIdx]=cur();persistSessions();renderTab()" style="font-size:11px;color:var(--mut)">🔄 Regenerate</button>
+    <button class="btn" onclick="updateCurSession({apExam:null});renderTab()" style="font-size:11px;color:var(--mut)">🔄 Regenerate</button>
   </div>${frqs}
   <div class="lbl" style="color:var(--c3);margin:18px 0 11px">Multiple Choice Questions</div>${mcqs}`;
 }
@@ -1182,9 +1512,8 @@ async function genGaps() {
     const s=cur();
     const raw=await callClaude([{role:'user',content:`Session: ${s.title}\nSummary: ${s.summary}\nTopics: ${(s.studyGuide?.sections||[]).map(x=>x.title).join(', ')}\nTranscript: ${(s.transcript||'').slice(0,3000)}`}],sys);
     const parsed=JSON.parse(raw.replace(/^```json|^```|```$/gm,'').trim());
-    s.gaps=parsed;
-    state.sessions[state.curIdx]=s;
-    persistSessions();
+    // FIX D: use updateCurSession() instead of direct state.sessions[i] write
+    updateCurSession({ gaps: parsed });
     addXP(15,'Gap analysis done!');
     $('tc').innerHTML=renderGapsContent(parsed);
   } catch(err) {
@@ -1218,12 +1547,159 @@ function renderGapsContent(d) {
     </div>`).join('')}
   </div>
   ${d.nextSession?`<div class="tip-box"><div class="lbl" style="color:var(--c4);margin-bottom:6px">🦉 Axie's Recommendation</div><p style="font-size:13px;color:var(--soft);line-height:1.65;margin:0">${e(d.nextSession)}</p></div>`:''}
-  <button class="btn" onclick="cur().gaps=null;state.sessions[state.curIdx]=cur();persistSessions();renderTab()" style="margin-top:14px;font-size:11px;color:var(--mut)">Re-analyze</button>`;
+  ${(()=>{
+    const s=cur(), uid=s?.unit?.id, u=UNITS.find(x=>x.id===uid);
+    const weakT=uid?getWeakTopics(uid):[];
+    if(!weakT.length) return '';
+    return `<div style="margin-top:22px;padding-top:18px;border-top:1px solid var(--bdr)">
+      <div class="lbl" style="color:var(--c5);margin-bottom:12px">🎯 Targeted Practice</div>
+      ${weakT.slice(0,2).map(t=>`
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--bdr);gap:12px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--txt);margin-bottom:2px">${t.label}</div>
+            <div class="lbl">${Math.round(t.score*100)}% correct · ${t.total} attempts</div>
+          </div>
+          <button class="btn-hi" style="font-size:12px;padding:7px 16px" onclick="launchDrill(${uid},'${t.topic}')">Drill now →</button>
+        </div>`).join('')}
+    </div>`;
+  })()}
+  <button class="btn" onclick="updateCurSession({gaps:null});renderTab()" style="margin-top:14px;font-size:11px;color:var(--mut)">Re-analyze</button>`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CHAT TAB
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TARGETED DRILL — generates + renders focused practice inline in Gaps tab
+// ─────────────────────────────────────────────────────────────────────────────
+async function genTargetedPractice(unitId, topic) {
+  const u   = UNITS.find(u => u.id === unitId);
+  const sys = `You are an AP Macroeconomics exam writer. Respond ONLY with valid JSON — no markdown:
+{"questions":[{"question":"...","options":["A) ...","B) ...","C) ...","D) ..."],"answer":"A","explanation":"...","topic":"${topic}"}]}
+Write exactly 3 AP-style MCQs testing "${topic.replace(/_/g,' ')}" in ${u?.lbl}. Hard, real exam difficulty.`;
+  const raw    = await callClaude([{ role:'user', content:`Topic: ${topic}\nUnit: ${u?.lbl}` }], sys);
+  const parsed = JSON.parse(raw.replace(/^```json|^```|```$/gm,'').trim());
+  return (parsed.questions || []).map(q => ({ ...q, topic: normTopic(q.topic) }));
+}
+
+function renderTargetedPractice(questions, topic, unitId) {
+  const u   = UNITS.find(u => u.id === unitId);
+  const lbl = topic.replace(/_/g,' ');
+  return `
+    <div style="background:${u?.col}10;border:1px solid ${u?.col}30;border-left:3px solid ${u?.col};border-radius:8px;padding:18px 20px;margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
+        <span style="font-family:monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:${u?.col};background:${u?.col}18;border:1px solid ${u?.col}30;padding:2px 8px;border-radius:2px">Targeted Practice</span>
+        <span style="font-size:13px;font-weight:600;color:var(--txt)">${lbl}</span>
+      </div>
+      <p style="font-size:12px;color:var(--soft);margin:0">3 questions on your weakest topic. Answer them all.</p>
+    </div>
+    ${questions.map((q,i) => `
+      <div class="card fadein" style="border-left:3px solid ${u?.col};margin-bottom:13px;padding:16px 18px">
+        <p style="font-weight:600;font-size:14px;color:var(--txt);line-height:1.55;margin-bottom:12px">${i+1}. ${e(q.question)}</p>
+        <div>${(q.options||[]).map((opt,oi) =>
+          `<div id="top-${i}-${oi}" class="qopt" onclick="tpickQ(${i},'${opt[0]}')">${e(opt)}</div>`
+        ).join('')}</div>
+        <button class="btn-hi" id="tcb-${i}" style="display:none;margin-top:10px;font-size:12px;padding:7px 18px"
+          onclick="tcheckQ(${i},'${q.answer}','${encodeURIComponent(q.explanation||'')}','${normTopic(q.topic)||topic}',${unitId})">Check ✓</button>
+        <div id="tex-${i}" style="display:none;font-size:12px;color:var(--soft);border-top:1px solid var(--bdr);padding-top:10px;margin-top:10px;line-height:1.75"></div>
+      </div>`).join('')}
+    <div id="tp-result" style="display:none"></div>`;
+}
+
+function tpickQ(qi, l) {
+  if (window._tchecked?.[qi]) return;
+  if (!window._tpicks) window._tpicks = {};
+  window._tpicks[qi] = l;
+  document.querySelectorAll(`[id^="top-${qi}-"]`).forEach((el,oi) => {
+    const x = 'ABCD'[oi];
+    el.style.background  = x===l ? 'rgba(79,195,247,.09)' : 'transparent';
+    el.style.borderColor = x===l ? '#4fc3f7' : 'var(--bdr)';
+    el.style.color       = x===l ? '#4fc3f7' : 'var(--soft)';
+  });
+  const b = $(`tcb-${qi}`); if (b) b.style.display = 'inline-block';
+}
+
+function tcheckQ(qi, correct, enc, topic, unitId) {
+  if (!window._tchecked) window._tchecked = {};
+  if (!window._tresults) window._tresults = {};
+  // FIX: declare ch and ok before using them
+  const ch = window._tpicks?.[qi];
+  const ok = ch === correct;
+  window._tchecked[qi] = true;
+  window._tresults[qi] = ok;
+
+  document.querySelectorAll(`[id^="top-${qi}-"]`).forEach((el,oi) => {
+    const x = 'ABCD'[oi];
+    if (x===correct)        { el.style.background='rgba(52,211,153,.09)'; el.style.borderColor='#34d399'; el.style.color='#34d399'; }
+    else if (x===ch && !ok) { el.style.background='rgba(251,113,133,.09)'; el.style.borderColor='#fb7185'; el.style.color='#fb7185'; }
+    el.style.cursor = 'default';
+  });
+  const b  = $(`tcb-${qi}`); if(b) b.style.display='none';
+  const ex = $(`tex-${qi}`); if(ex){ ex.style.display='block'; ex.innerHTML=(ok?'✅ ':'❌ ')+e(decodeURIComponent(enc)); }
+
+  // Write back into perf — same path as checkQ
+  const nt = normTopic(topic);
+  if (nt && unitId != null) {
+    if (!state.perf[unitId]) state.perf[unitId] = { correct:0, total:0, ignored:0, topics:{} };
+    const p = state.perf[unitId];
+    p.total++; if (ok) p.correct++;
+    if (!p.topics[nt]) p.topics[nt] = { correct:0, total:0 };
+    p.topics[nt].total++; if (ok) p.topics[nt].correct++;
+    persistPerf();
+    if (p.total >= 5 && (p.correct / p.total) > 0.7) { p.ignored = 0; persistPerf(); }
+  }
+
+  addXP(ok ? 15 : 5, ok ? 'Targeted drill! 🎯' : 'Keep drilling!');
+
+  // All 3 answered — show result using _tresults (not the current `correct`)
+  if (Object.keys(window._tchecked).length >= 3) {
+    const correct_count = Object.values(window._tresults).filter(Boolean).length;
+    const pct = Math.round((correct_count / 3) * 100);
+    const res = $('tp-result');
+    if (res) {
+      res.style.display = 'block';
+      res.innerHTML = `<div class="tip-box" style="margin-top:8px">
+        <div class="lbl" style="color:var(--c4);margin-bottom:6px">Drill complete</div>
+        <p style="font-size:13px;color:var(--soft);margin:0;line-height:1.65">
+          Scored <strong style="color:var(--accent)">${correct_count}/3</strong> on
+          <strong style="color:var(--txt)">${topic.replace(/_/g,' ')}</strong>.
+          ${pct >= 70 ? ' Pressure cleared. ✅' : ' Not there yet — keep going.'}
+        </p>
+      </div>`;
+      if (pct >= 70) {
+        setTimeout(() => axieSay(`✅ ${topic.replace(/_/g,' ')} — pressure cleared. Nice work.`), 400);
+      } else {
+        setTimeout(() => {
+          axieEnqueue(`📌 Still below 70% on ${topic.replace(/_/g,' ')}.`);
+          axieEnqueue('→ One more session will move this number.');
+        }, 400);
+      }
+    }
+  }
+}
+
+async function launchDrill(unitId, topic) {
+  // Force navigation to gaps tab — don't rely on user being there
+  state.tab = 'gaps';
+  render();
+  const tc = $('tc'); if (!tc) return;
+  tc.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--soft)">
+    <div class="spin" style="margin:0 auto 12px"></div>
+    <div style="font-size:13px">Generating targeted questions on ${topic.replace(/_/g,' ')}…</div>
+  </div>`;
+  window._tpicks   = {};
+  window._tchecked = {};
+  window._tresults = {};
+  try {
+    const questions = await genTargetedPractice(unitId, topic);
+    tc.innerHTML = renderTargetedPractice(questions, topic, unitId);
+    axieEnqueue(`🎯 3 questions on ${topic.replace(/_/g,' ')}. Answer all of them.`);
+  } catch (err) {
+    tc.innerHTML = `<div class="err">Failed to generate drill: ${e(err.message)}</div>`;
+  }
+}
+
 function renderChat() {
   state.chatH = [];
   return `<div class="lbl" style="margin-bottom:13px">🦉 Ask Axie Anything</div>
@@ -1306,19 +1782,20 @@ function buildNotion(s) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// INIT  — runs once after DOM is ready
+// INIT
 // ─────────────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  loadState();          // hydrate state from localStorage (no DOM writes)
-  renderHero();         // paint hero stats/countdown/xp (DOM is ready now)
+  loadState();
+  renderHero();
   if (!state.apiKey) {
-    renderSetup();      // first-time user
+    state.page = 'setup';
+    render();
   } else {
     checkStreak();
-    render();           // normal entry — renders home page
+    render();
   }
-  setInterval(renderHero, 60000);   // refresh countdown every minute
-  setTimeout(axieTap, 2400);        // axie greeting after 2.4s
+  setInterval(renderHero, 60000);
+  setTimeout(axieTap, 2400);
 });
 </script>
 </body>
