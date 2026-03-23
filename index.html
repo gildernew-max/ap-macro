@@ -261,26 +261,11 @@ ul.blist li::before{content:'›';position:absolute;left:0;color:var(--mut)}
 <div id="app"></div>
 
 <script>
-// ── DATA ──────────────────────────────────────────────────────────────────
-function loadS(){try{return JSON.parse(localStorage.getItem('apex-sessions')||'[]')}catch{return[]}}
-function saveS(s){try{localStorage.setItem('apex-sessions',JSON.stringify(s))}catch{}}
-function detectUnit(s){
-  const tx=[s.title,s.summary,...(s.studyGuide?.keyTakeaways||[]),...(s.studyGuide?.sections||[]).map(x=>x.title+' '+(x.cards||[]).map(c=>c.title).join(' '))].join(' ').toLowerCase();
-  let best=null,top=0;
-  for(const u of UNITS){const sc=u.kw.filter(k=>tx.includes(k)).length;if(sc>top){top=sc;best=u;}}
-  return best||UNITS[3];
-}
-
-let sessions=loadS().map(s=>s.unit?s:{...s,unit:detectUnit(s)});
-let cur=null,tab='visual',htab='sessions';
-let fcIdx=0,picks={},checked={},chatH=[],mcqP={};
-let qScore=0,qTotal=0;
-
-// ── THEME (must come after sessions is defined) ───────────────────────────
+// ── THEME ─────────────────────────────────────────────────────────────────
 const PALETTE=['#f0c040','#4fc3f7','#a78bfa','#34d399','#fb7185','#c084fc','#ff8c42'];
 let accent=localStorage.getItem('apex-accent')||'#f0c040';
-const setAccent=c=>{accent=c;localStorage.setItem('apex-accent',c);document.documentElement.style.setProperty('--accent',c);updateHero();};
-document.documentElement.style.setProperty('--accent',accent);
+const setAccent=c=>{accent=c;localStorage.setItem('apex-accent',c);document.documentElement.style.setProperty('--accent',c);document.documentElement.style.setProperty('--c1',c);updateHero()};
+setAccent(accent);
 
 // ── XP & STREAK ───────────────────────────────────────────────────────────
 let G=JSON.parse(localStorage.getItem('apex-g')||'{"xp":0,"lv":1,"streak":0,"last":"","sess":0,"cards":0,"quizzes":0}');
@@ -313,11 +298,12 @@ function updateHero(){
   const cd=countdown(),pct=Math.min(100,Math.round(G.xp/xpNeeded(G.lv)*100));
   const urg=cd.d<7?'var(--c5)':cd.d<21?'var(--c7)':cd.d<60?'var(--accent)':'var(--c4)';
   const el=id=>document.getElementById(id);
+  const sessCount=(typeof sessions!=='undefined'?sessions:loadS()).length;
 
   if(el('stats'))el('stats').innerHTML=
     `<div class="stat">🔥 <b>${G.streak}</b> day streak</div>
      <div class="stat">⭐ Level <b>${G.lv}</b></div>
-     <div class="stat">📚 <b>${sessions.length}</b> sessions</div>
+     <div class="stat">📚 <b>${sessCount}</b> sessions</div>
      <div class="stat">🃏 <b>${G.cards}</b> cards reviewed</div>`;
 
   if(el('cd')){
@@ -432,6 +418,20 @@ const UNIT_OVERVIEWS=[
   {id:5,tag:'What happens in the long run when policy goes wrong — or right?',intro:'Unit 5 is where short-run thinking meets long-run reality. Policies that feel good today can have painful side effects later.',secs:[{t:'The Phillips Curve — inflation vs unemployment',b:'Short run: lower unemployment → higher inflation. The **SRPC** is downward sloping. Long run: no trade-off — **LRPC is vertical** at the natural rate. The SRPC mirrors the SRAS — they shift together. Stagflation shifts both SRAS left and SRPC right.'},{t:'Crowding out — the dark side of deficit spending',b:'Government borrows → ↑ demand for loanable funds → real rates rise → private investment falls = **crowded out**. Budget surplus does the reverse: **crowding in** → lower rates → more investment.'},{t:'The Quantity Theory of Money',b:'**M × V = P × Y**. If M doubles and V, Y stay constant → P doubles → inflation. This is why excessive money printing causes inflation in the long run.'},{t:'Long-run economic growth',b:'Real growth = LRAS shifting right. Drivers: ↑ resources, ↑ technology, ↑ productivity. Government accelerates this with R&D, tax credits, education, deregulation. PPC shifts outward.'}],tip:'Unit 5 is 20–30% — highest weight of any unit. Know Phillips Curve shifts, crowding out in the loanable funds graph, and long-run policy consequences cold.'},
   {id:6,tag:'How countries trade, borrow, and set exchange rates.',intro:'Unit 6 zooms out to the global economy. When the Fed raises rates, what happens to the dollar? It shows up on every AP Macro exam.',secs:[{t:'The balance of payments',b:'**Current account**: trade in goods, services, income. **Capital & Financial account**: purchases of assets. Golden rule: **Current + Capital = 0**. A trade deficit → capital inflows. The accounts always balance.'},{t:'Exchange rates',b:'Dollar **appreciates** → imports cheaper, exports pricier abroad → net exports fall → AD shifts left. Dollar **depreciates** → exports boom → net exports rise → AD shifts right.'},{t:'The interest rate → exchange rate chain',b:'**Fed raises rates → US assets more attractive → demand for dollars ↑ → dollar appreciates → imports ↑, exports ↓ → net exports fall → AD shifts left.** Draw this chain for any Unit 6 FRQ.'}],tip:'Unit 6 is 10–13% but heavy in FRQs. The exchange rate / interest rate chain is almost guaranteed. Practice the forex market graph.'},
 ];
+
+// ── DATA ──────────────────────────────────────────────────────────────────
+function loadS(){try{return JSON.parse(localStorage.getItem('apex-sessions')||'[]')}catch{return[]}}
+function saveS(s){try{localStorage.setItem('apex-sessions',JSON.stringify(s))}catch{}}
+function detectUnit(s){
+  const tx=[s.title,s.summary,...(s.studyGuide?.keyTakeaways||[]),...(s.studyGuide?.sections||[]).map(x=>x.title+' '+(x.cards||[]).map(c=>c.title).join(' '))].join(' ').toLowerCase();
+  let best=null,top=0;
+  for(const u of UNITS){const sc=u.kw.filter(k=>tx.includes(k)).length;if(sc>top){top=sc;best=u;}}
+  return best||UNITS[3];
+}
+
+let sessions=loadS().map(s=>s.unit?s:{...s,unit:detectUnit(s)});
+let cur=null,tab='visual',htab='sessions';
+let fcIdx=0,picks={},checked={},chatH=[],mcqP={};
 
 // ── API ───────────────────────────────────────────────────────────────────
 async function callClaude(msgs,sys){
@@ -1084,12 +1084,10 @@ function buildNotion(s){
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded',()=>{
-  updateHero();
-  setInterval(updateHero,60000);
-  setTimeout(()=>axieTap(),2200);
-  if(!API_KEY)showSetup();else{checkStreak();showHome();}
-});
+if(!API_KEY)showSetup();else{checkStreak();showHome();}
+setTimeout(()=>updateHero(),100);
+setInterval(()=>updateHero(),60000);
+setTimeout(()=>axieTap(),2400);
 </script>
 </body>
 </html>
