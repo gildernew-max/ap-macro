@@ -1273,7 +1273,16 @@ function buildNotion(s) {
 // ── INIT ──────────────────────────────────────────────────────────────────
 if (!API_KEY) showSetup();
 else { checkStreak(); showHome(); }
-setTimeout(() => updateHero(), 80);
+
+// Hero updates — retry until elements exist
+function tryUpdateHero(attempts) {
+  if ($('stats') && $('cd') && $('xp')) {
+    updateHero();
+  } else if (attempts > 0) {
+    setTimeout(() => tryUpdateHero(attempts - 1), 100);
+  }
+}
+tryUpdateHero(20);
 setInterval(() => updateHero(), 60000);
 setTimeout(() => axieTap(), 2400);
 </script>
