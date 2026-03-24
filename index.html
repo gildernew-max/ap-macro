@@ -10,8 +10,8 @@
   --bg:#1c1710;--surf:#221e14;--card:#2a2318;--card2:#322b1e;
   --bdr:#3d3428;--bdr2:#4a3f30;
   --txt:#f0e8d8;--mut:#6b5e48;--soft:#9a8a72;--mid:#c8b898;
-  --accent:#e8a020;
-  --c1:#e8a020;--c2:#4fc3f7;--c3:#c084fc;--c4:#34d399;--c5:#fb7185;--c6:#f59e0b;--c7:#ff8c42;
+  --accent:#f0c040;
+  --c1:#f0c040;--c2:#4fc3f7;--c3:#c084fc;--c4:#34d399;--c5:#fb7185;--c6:#f59e0b;--c7:#ff8c42;
 }
 html{scroll-behavior:smooth}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',system-ui,sans-serif;background:var(--bg);color:var(--txt);font-size:14px;min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
@@ -52,9 +52,6 @@ a{color:inherit;text-decoration:none}
 .cd-lbl{font-size:9px;font-family:monospace;letter-spacing:2px;text-transform:uppercase;color:var(--mut);margin-top:2px}
 .cd-div{width:1px;height:32px;background:var(--bdr2)}
 .cd-info{flex:1;min-width:160px;padding-left:18px;font-size:13px;color:var(--soft);line-height:1.55}
-.cd-swatches{display:flex;gap:6px;align-items:center;margin-left:auto;padding-left:16px;flex-wrap:wrap}
-.swatch{width:20px;height:20px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all .2s;flex-shrink:0}
-.swatch.on{border-color:rgba(255,255,255,.7);transform:scale(1.15)}
 
 .xp-wrap{margin-top:12px}
 .xp-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;font-family:monospace;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--mut)}
@@ -178,7 +175,6 @@ ul.blist li::before{content:'›';position:absolute;left:0;color:var(--mut)}
   .ugrid,.g2{grid-template-columns:1fr 1fr}
   .g3{grid-template-columns:1fr 1fr}
   .grade-badge{min-width:120px}
-  .cd-swatches{display:none}
 }
 
 /* ═══════════════════════════════════════════════════
@@ -670,7 +666,6 @@ ul.blist li::before{content:'›';position:absolute;left:0;color:var(--mut)}
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
 const MODEL        = 'claude-sonnet-4-20250514';
-const PALETTE      = ['#f0c040','#4fc3f7','#a78bfa','#34d399','#fb7185','#c084fc','#ff8c42'];
 const AC           = ['#f0c040','#4fc3f7','#a78bfa','#34d399','#fb7185','#c084fc'];
 const ac           = i => AC[i % AC.length];
 const AP_EXAM_DATE = new Date('2026-05-07T08:00:00'); // single source of truth
@@ -756,7 +751,7 @@ const DEFAULT_CURRICULUM = [{"id":2001,"isDefault":true,"date":"2024-01-01T08:00
 
 function loadState() {
   state.apiKey    = localStorage.getItem('apex-key')      || '';
-  state.accent    = localStorage.getItem('apex-accent')   || '#f0c040';
+  state.accent    = '#f0c040'; // locked to gold
   // Load user sessions from localStorage
   const userSessions = (JSON.parse(localStorage.getItem('apex-sessions') || '[]'))
     .map(s => s.unit ? s : { ...s, unit: detectUnit(s) });
@@ -847,9 +842,7 @@ function renderHero() {
        <div class="cd-block"><div class="cd-num" style="color:${urg};font-size:22px">${cd.h}h</div><div class="cd-lbl">hours</div></div>
        <div class="cd-div"></div>
        <div class="cd-info">until <strong style="color:var(--txt)">AP Macro Exam</strong><br><span style="font-size:11px;color:var(--mut)">${AP_EXAM_DATE.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})} · 8:00 AM</span></div>
-       <div class="cd-swatches">${PALETTE.map(c =>
-         `<div class="swatch${c === state.accent ? ' on' : ''}" style="background:${c}" onclick="setAccent('${c}')"></div>`
-       ).join('')}</div>`;
+`;
 
   const xpEl = $('xp');
   if (xpEl) xpEl.innerHTML =
@@ -874,13 +867,7 @@ function renderHero() {
 // ─────────────────────────────────────────────────────────────────────────────
 // ACCENT / XP / STREAK
 // ─────────────────────────────────────────────────────────────────────────────
-function setAccent(c) {
-  state.accent = c;
-  localStorage.setItem('apex-accent', c);
-  document.documentElement.style.setProperty('--accent', c);
-  document.documentElement.style.setProperty('--c1',     c);
-  renderHero();
-}
+// setAccent removed — gold locked
 
 const xpNeeded = l => l * 120;
 
@@ -1271,8 +1258,8 @@ function injectQuote() {
   div.innerHTML = `<div class="qfoot" id="qfooter">
     <div style="display:flex;gap:12px;align-items:flex-start">
       <div style="font-size:28px;color:var(--accent);opacity:.25;line-height:1;flex-shrink:0;margin-top:-2px">"</div>
-      <div>
-        <div class="qfoot-q">${e(q.q)}</div>
+      <div style="flex:1">
+        <div class="qfoot-q">${e(q.q)}<span style="font-size:28px;color:var(--accent);opacity:.25;line-height:0;vertical-align:bottom;margin-left:4px">"</span></div>
         <div class="qfoot-a">— <span>${e(q.a)}</span>${q.b ? ` · <em style="font-style:italic;color:var(--mut)">${e(q.b)}</em>` : ''}</div>
         <button class="qfoot-btn" onclick="nextQuote()">next quote →</button>
       </div>
@@ -1510,7 +1497,7 @@ function renderTrailHTML() {
   const pct       = Math.round((doneSess / UNITS.length) * 100);
   const G         = state.xp;
 
-  // ── Progress bar ──
+  // Progress bar
   const progressBar = `
     <div class="trail-progress-bar fadein">
       <div class="trail-progress-stat">
@@ -1537,35 +1524,40 @@ function renderTrailHTML() {
       ${!state.apiKey ? `<button class="btn" onclick="state.page='setup';state._setupErr='';render()" style="font-size:11px;white-space:nowrap">🔑 Add Key</button>` : ''}
     </div>`;
 
-  // ════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════
   // GEOMETRY
-  // Container SVG viewBox = 420px wide
-  // Left nodes:  x = 120  (CX - OFFSET = 210 - 90)
-  // Right nodes: x = 300  (CX + OFFSET = 210 + 90)
-  // Node radius R = 43px → circle spans x±43
-  // Label zone left  side: 0 → (120 - 43 - 14) = 63px right edge  → right-aligned in [0, 63]
-  // Label zone right side: (300 + 43 + 14) = 357px left edge → left-aligned in [357, 420]
-  // Label width available: 63px left / 63px right — tight!
-  // → Widen: use the full half minus circle: left zone ≈ 0–60px, right zone ≈ 360–420px
-  // → But trail-outer is 480px wide, SVG is 420px, so there's extra margin
-  //    We can use negative margins on labels or wider container
-  // ════════════════════════════════════════════════════════════
-  const W       = 420;
-  const CX      = W / 2;       // 210
-  const OFFSET  = 90;          // node drift from center
+  // SVG_W=420, SVG road curves stay unchanged
+  // OUTER = wider nodes-layer so labels have room on both sides
+  // SVG sits centered inside OUTER with offset SVG_OX
+  // HTML node x = SVG_OX + SVG_nodeX
+  // Label zones:
+  //   Left  nodes (SVG x=120): HTML x=190 → label in [16..131]
+  //   Right nodes (SVG x=300): HTML x=370 → label in [429..544]
+  // ════════════════════════════════════════════════════════
+  const SVG_W   = 420;
+  const SVG_CX  = SVG_W / 2;          // 210 — SVG center
+  const OFFSET  = 90;                  // node offset from SVG center
+  const OUTER   = 560;                 // nodes-layer width (wider than SVG)
+  const SVG_OX  = (OUTER - SVG_W) / 2; // 70 — SVG left offset inside OUTER
+  const CX      = SVG_OX + SVG_CX;    // 280 — center in OUTER coords
   const VSTEP   = 230;
   const CP      = 0.35;
-  const R       = 43;          // node radius
-  const LGAP    = 10;          // gap between circle edge and label
-  const LWID    = 140;         // label width (fits in zone)
+  const R       = 43;                  // node circle radius
+  const LGAP    = 16;                  // gap from circle edge to label
+  const LWID    = 120;                 // label width
 
-  const nodeX   = idx => idx % 2 === 0 ? CX - OFFSET : CX + OFFSET;
-  const nodeY   = idx => 70 + idx * VSTEP;
-  const finishY = 70 + trail.length * VSTEP + 60;
-  const svgH    = finishY + 110;
+  // SVG-space node positions (for road drawing)
+  const svgNodeX = idx => idx % 2 === 0 ? SVG_CX - OFFSET : SVG_CX + OFFSET; // 120 or 300
+  const svgNodeY = idx => 70 + idx * VSTEP;
 
-  // Which side is a node on?
-  const onLeft  = idx => idx % 2 === 0;
+  // HTML-space node positions (for HTML elements)
+  const nodeX    = idx => SVG_OX + svgNodeX(idx); // 190 or 370
+  const nodeY    = idx => svgNodeY(idx);           // same Y
+
+  const finishY  = 70 + trail.length * VSTEP + 60;
+  const svgH     = finishY + 110;
+
+  const onLeft   = idx => idx % 2 === 0;
 
   function bez(t, x0, y0, cpx0, cpy0, cpx1, cpy1, x1, y1) {
     const u = 1 - t;
@@ -1575,62 +1567,10 @@ function renderTrailHTML() {
     };
   }
 
-  // ── LABEL PLACEMENT HELPER ──
-  // Places a label div in the nodes-layer (position:absolute relative to layer)
-  // labelX, labelY = the anchor point (center of circle / waypoint dot)
-  // side: 'left' = label is to the LEFT of anchor (right-aligned, right edge = anchor - R - LGAP)
-  //        'right' = label to the RIGHT (left-aligned, left edge = anchor + R + LGAP)
-  function labelStyle(anchorX, anchorY, side, width, color, fontSize, weight) {
-    const fs   = fontSize || 13;
-    const fw   = weight   || 700;
-    const w    = width    || LWID;
-    if (side === 'left') {
-      // label sits LEFT of anchor — right edge flush with (anchorX - R - LGAP)
-      // In the nodes-layer (width=W), right edge = W - (anchorX - R - LGAP) from right
-      const rightEdge = W - (anchorX - R - LGAP);
-      return `position:absolute;right:${rightEdge}px;left:auto;` +
-             `top:${anchorY - 28}px;width:${w}px;` +
-             `text-align:right;z-index:12;` +
-             `color:${color};font-size:${fs}px;font-weight:${fw};font-family:monospace;` +
-             `letter-spacing:.3px;text-transform:uppercase;line-height:1.35;`;
-    } else {
-      // label sits RIGHT of anchor — left edge flush with (anchorX + R + LGAP)
-      return `position:absolute;left:${anchorX + R + LGAP}px;right:auto;` +
-             `top:${anchorY - 28}px;width:${w}px;` +
-             `text-align:left;z-index:12;` +
-             `color:${color};font-size:${fs}px;font-weight:${fw};font-family:monospace;` +
-             `letter-spacing:.3px;text-transform:uppercase;line-height:1.35;`;
-    }
-  }
-
-  // Smaller version for waypoints (smaller circles, R_WP=12)
-  const R_WP = 12;
-  function wpLabelStyle(anchorX, anchorY, side, color, active) {
-    const fw = active ? 700 : 500;
-    if (side === 'left') {
-      const rightEdge = W - (anchorX - R_WP - LGAP);
-      return `position:absolute;right:${rightEdge}px;left:auto;` +
-             `top:${anchorY - 11}px;width:${LWID + 10}px;` +
-             `text-align:right;z-index:11;` +
-             `color:${color};font-size:12px;font-weight:${fw};font-family:monospace;` +
-             `letter-spacing:.2px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
-    } else {
-      return `position:absolute;left:${anchorX + R_WP + LGAP}px;right:auto;` +
-             `top:${anchorY - 11}px;width:${LWID + 10}px;` +
-             `text-align:left;z-index:11;` +
-             `color:${color};font-size:12px;font-weight:${fw};font-family:monospace;` +
-             `letter-spacing:.2px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
-    }
-  }
-
-  // ── SVG: defs, roads, shadows ──
+  // ── SVG: roads + shadows ──
   let svgDefs = `<defs>
     <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
       <feGaussianBlur stdDeviation="5" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-    <filter id="glow-sm" x="-60%" y="-60%" width="220%" height="220%">
-      <feGaussianBlur stdDeviation="3" result="b"/>
       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>`;
@@ -1638,111 +1578,123 @@ function renderTrailHTML() {
   let svgRoads = '', svgShadows = '';
 
   for (let i = 0; i < trail.length - 1; i++) {
-    const u   = trail[i];
-    const x0  = nodeX(i),   y0 = nodeY(i);
-    const x1  = nodeX(i+1), y1 = nodeY(i+1);
-    const cpx0 = CX, cpy0 = y0 + VSTEP * CP;
-    const cpx1 = CX, cpy1 = y1 - VSTEP * CP;
+    const u    = trail[i];
+    const x0   = svgNodeX(i),   y0 = svgNodeY(i);
+    const x1   = svgNodeX(i+1), y1 = svgNodeY(i+1);
+    const cpx0 = SVG_CX, cpy0 = y0 + VSTEP * CP;
+    const cpx1 = SVG_CX, cpy1 = y1 - VSTEP * CP;
     const isDone   = u.state === 'done';
     const isActive = u.state === 'active';
 
     if (isDone) {
       svgRoads += `<path d="M${x0},${y0} C${cpx0},${cpy0} ${cpx1},${cpy1} ${x1},${y1}"
-        fill="none" stroke="${u.col}" stroke-width="26" stroke-linecap="round"
-        opacity="0.22" filter="url(#glow)"/>`;
+        fill="none" stroke="${u.col}" stroke-width="26" stroke-linecap="round" opacity="0.22" filter="url(#glow)"/>`;
     }
     svgRoads += `<path d="M${x0},${y0} C${cpx0},${cpy0} ${cpx1},${cpy1} ${x1},${y1}"
-      fill="none" stroke="${isDone ? u.col : '#3d3428'}" stroke-width="16" stroke-linecap="round"
-      opacity="${isDone ? '1' : isActive ? '0.5' : '0.25'}"/>`;
+      fill="none" stroke="${isDone?u.col:'#3d3428'}" stroke-width="16" stroke-linecap="round"
+      opacity="${isDone?'1':isActive?'0.5':'0.25'}"/>`;
     if (isDone) {
       svgRoads += `<path d="M${x0},${y0} C${cpx0},${cpy0} ${cpx1},${cpy1} ${x1},${y1}"
-        fill="none" stroke="rgba(255,255,255,.12)" stroke-width="4"
-        stroke-dasharray="10 18" stroke-linecap="round"/>`;
+        fill="none" stroke="rgba(255,255,255,.12)" stroke-width="4" stroke-dasharray="10 18" stroke-linecap="round"/>`;
     } else {
       svgRoads += `<path d="M${x0},${y0} C${cpx0},${cpy0} ${cpx1},${cpy1} ${x1},${y1}"
-        fill="none" stroke="#4a3f30" stroke-width="3"
-        stroke-dasharray="6 10" stroke-linecap="round" opacity="0.6"/>`;
+        fill="none" stroke="#4a3f30" stroke-width="3" stroke-dasharray="6 10" stroke-linecap="round" opacity="0.6"/>`;
     }
   }
-
-  // Road: last unit → finish
+  // Last unit → finish (in SVG space)
   {
-    const last = trail[trail.length - 1];
-    const x0 = nodeX(trail.length - 1), y0 = nodeY(trail.length - 1);
-    const x1 = CX, y1 = finishY;
-    const cpx0 = CX, cpy0 = y0 + 60, cpx1 = CX, cpy1 = y1 - 60;
+    const last = trail[trail.length-1];
+    const x0 = svgNodeX(trail.length-1), y0 = svgNodeY(trail.length-1);
+    const x1 = SVG_CX, y1 = finishY;
     const isDone = last.state === 'done';
-    svgRoads += `<path d="M${x0},${y0} C${cpx0},${cpy0} ${cpx1},${cpy1} ${x1},${y1}"
-      fill="none" stroke="${isDone ? last.col : '#3d3428'}" stroke-width="16" stroke-linecap="round"
-      opacity="${isDone ? '1' : '0.25'}"/>`;
-    if (!isDone) {
-      svgRoads += `<path d="M${x0},${y0} C${cpx0},${cpy0} ${cpx1},${cpy1} ${x1},${y1}"
-        fill="none" stroke="#4a3f30" stroke-width="3"
-        stroke-dasharray="6 10" stroke-linecap="round" opacity="0.6"/>`;
-    }
+    svgRoads += `<path d="M${x0},${y0} C${SVG_CX},${y0+60} ${SVG_CX},${y1-60} ${x1},${y1}"
+      fill="none" stroke="${isDone?last.col:'#3d3428'}" stroke-width="16" stroke-linecap="round"
+      opacity="${isDone?'1':'0.25'}"/>`;
+    if (!isDone) svgRoads += `<path d="M${x0},${y0} C${SVG_CX},${y0+60} ${SVG_CX},${y1-60} ${x1},${y1}"
+      fill="none" stroke="#4a3f30" stroke-width="3" stroke-dasharray="6 10" stroke-linecap="round" opacity="0.6"/>`;
   }
 
-  // Shadows
+  // Shadows (SVG space)
   trail.forEach((u, idx) => {
     if (u.state === 'locked') return;
-    svgShadows += `<circle cx="${nodeX(idx)}" cy="${nodeY(idx)+4}" r="46"
-      fill="rgba(0,0,0,.35)" filter="url(#glow)"/>`;
+    svgShadows += `<circle cx="${svgNodeX(idx)}" cy="${svgNodeY(idx)+4}" r="46" fill="rgba(0,0,0,.35)" filter="url(#glow)"/>`;
   });
   const allDone = trail.every(u => u.state === 'done');
-  if (allDone) svgShadows += `<circle cx="${CX}" cy="${finishY+4}" r="38" fill="rgba(0,0,0,.35)" filter="url(#glow)"/>`;
+  if (allDone) svgShadows += `<circle cx="${SVG_CX}" cy="${finishY+4}" r="38" fill="rgba(0,0,0,.35)" filter="url(#glow)"/>`;
 
-  const fullSVG = `<svg class="trail-svg" viewBox="0 0 ${W} ${svgH}"
-    xmlns="http://www.w3.org/2000/svg" style="height:${svgH}px">
+  // SVG is centered inside the nodes-layer via SVG_OX offset
+  const fullSVG = `<svg class="trail-svg"
+    viewBox="0 0 ${SVG_W} ${svgH}"
+    xmlns="http://www.w3.org/2000/svg"
+    style="height:${svgH}px;position:absolute;left:${SVG_OX}px;top:0;width:${SVG_W}px;pointer-events:none;overflow:visible;">
     ${svgDefs}${svgRoads}${svgShadows}
   </svg>`;
 
-  // ── HTML nodes layer ──
-  let nodesHTML = `<div class="trail-nodes-layer" style="height:${svgH}px">`;
+  // ── HTML nodes layer (OUTER width) ──
+  let nodesHTML = `<div class="trail-nodes-layer" style="height:${svgH}px;position:relative;width:${OUTER}px;margin:0 auto;">`;
 
   trail.forEach((u, idx) => {
-    const x     = nodeX(idx);
+    const x     = nodeX(idx);   // HTML-space x (includes SVG_OX offset)
     const y     = nodeY(idx);
+    const sx    = svgNodeX(idx); // SVG-space x (for waypoint bezier)
     const uc    = u.col;
     const isExp = _trailExpanded === u.id;
     const left  = onLeft(idx);
     const topics = TRAIL_TOPICS[u.id] || [];
 
     // ── WAYPOINT DOTS + LABELS ──
-    // Each label is its OWN absolutely-positioned div in the nodes-layer
-    // It is NOT a child of the dot — no transform interference
+    // Waypoints computed in SVG space, then offset to HTML space via SVG_OX
     if (idx > 0) {
-      const px    = nodeX(idx - 1), py = nodeY(idx - 1);
-      const cpx0  = CX, cpy0 = py + VSTEP * CP;
-      const cpx1  = CX, cpy1 = y  - VSTEP * CP;
+      const px_svg = svgNodeX(idx-1), py = svgNodeY(idx-1);
+      const cx_svg = svgNodeX(idx);
+      const cpx0 = SVG_CX, cpy0 = py + VSTEP * CP;
+      const cpx1 = SVG_CX, cpy1 = y  - VSTEP * CP;
 
       [0.25, 0.5, 0.75].forEach((t, ti) => {
-        const pt     = bez(t, px, py, cpx0, cpy0, cpx1, cpy1, x, y);
-        const tp     = topics[ti] || { lbl: '' };
-        const orbBg  = u.state === 'done' ? uc : u.state === 'active' ? 'var(--card)' : 'var(--surf)';
-        const orbBdr = u.state !== 'locked' ? uc : 'var(--bdr)';
-        const orbSh  = u.state === 'done' ? `0 0 10px ${uc}80` : 'none';
-        const wpColor = u.state === 'done' ? uc : u.state === 'active' ? 'var(--mid)' : 'var(--mut)';
-        const isActive = u.state === 'active';
+        // Bezier point in SVG space
+        const pt_svg = bez(t, px_svg, py, cpx0, cpy0, cpx1, cpy1, cx_svg, y);
+        // Translate to HTML space
+        const pt_x = SVG_OX + pt_svg.x;
+        const pt_y = pt_svg.y;
+        const tp   = topics[ti] || { lbl: '' };
 
-        // Which side to put the label?
-        // At t=0.25 (near prev node), t=0.75 (near curr node): pt.x is offset from center
-        // At t=0.5 (near CX): both sides are equidistant — use CURRENT unit's side
-        // Rule: if pt.x < CX → label to the RIGHT (more space on right)
-        //        if pt.x >= CX → label to the LEFT (more space on left)
-        const wpSide = pt.x < CX ? 'right' : 'left';
+        const orbBg  = u.state==='done' ? uc : u.state==='active' ? 'var(--card)' : 'var(--surf)';
+        const orbBdr = u.state!=='locked' ? uc : 'var(--bdr)';
+        const orbSh  = u.state==='done' ? `0 0 10px ${uc}80` : 'none';
+        const wpColor = u.state==='done' ? uc : u.state==='active' ? 'var(--mid)' : 'var(--mut)';
+        const isAct  = u.state === 'active';
 
-        // Dot itself
-        nodesHTML += `<div style="position:absolute;left:${pt.x}px;top:${pt.y}px;
+        // Dot (centered on pt_x, pt_y)
+        nodesHTML += `<div style="position:absolute;left:${pt_x}px;top:${pt_y}px;
           transform:translate(-50%,-50%);z-index:8;width:24px;height:24px;border-radius:50%;
-          background:${orbBg};border:3px solid ${u.state!=='locked'?uc:'var(--bdr)'};
-          box-shadow:${orbSh};display:flex;align-items:center;justify-content:center;
+          background:${orbBg};border:3px solid ${orbBdr};box-shadow:${orbSh};
+          display:flex;align-items:center;justify-content:center;
           font-size:10px;font-weight:900;color:${u.state==='done'?'rgba(0,0,0,.7)':'transparent'}">
-          ${u.state === 'done' ? '✓' : ''}
+          ${u.state==='done'?'✓':''}
         </div>`;
 
-        // Label as a SEPARATE absolutely-positioned element — NOT inside the dot
+        // Label: separate element, positioned LEFT or RIGHT of dot
+        // Which side? If pt_x < CX → more room on right; if pt_x >= CX → more room on left
         if (tp.lbl) {
-          nodesHTML += `<div style="${wpLabelStyle(pt.x, pt.y, wpSide, wpColor, isActive)}">${tp.lbl}</div>`;
+          const wpSide = pt_x < CX ? 'right' : 'left';
+          const R_WP   = 12;
+          const GAP_WP = 12;
+          const W_WP   = LWID + 30; // wider for waypoints — can wrap
+          let wpStyle;
+          if (wpSide === 'right') {
+            wpStyle = `position:absolute;left:${pt_x+R_WP+GAP_WP}px;top:${pt_y-14}px;
+              width:${W_WP}px;text-align:left;`;
+          } else {
+            const rEdge = OUTER - (pt_x - R_WP - GAP_WP);
+            wpStyle = `position:absolute;right:${rEdge}px;top:${pt_y-14}px;
+              width:${W_WP}px;text-align:right;`;
+          }
+          nodesHTML += `<div style="${wpStyle}z-index:11;
+            color:${wpColor};font-size:12px;font-weight:${isAct?700:500};
+            font-family:monospace;letter-spacing:.2px;line-height:1.3;
+            white-space:normal;word-break:break-word;">
+            ${tp.lbl}
+          </div>`;
         }
       });
     }
@@ -1755,21 +1707,21 @@ function renderTrailHTML() {
         : 'left:calc(50% + 56px);right:auto;transform:none';
       let cards = '';
       if (u.sessions.length) {
-        cards = u.sessions.slice(0, 5).map(({s, i}) => {
+        cards = u.sessions.slice(0,5).map(({s,i}) => {
           const gr = s.instructorGrade;
-          const gc = gr ? (gr.score >= 90 ? '#34d399' : gr.score >= 75 ? '#e8a020' : '#fb7185') : uc;
+          const gc = gr ? (gr.score>=90?'#34d399':gr.score>=75?'#e8a020':'#fb7185') : uc;
           return `<div class="trail-panel-card" onclick="goStudy(${i})">
             <div style="width:8px;height:8px;border-radius:50%;background:${uc};flex-shrink:0;box-shadow:0 0 6px ${uc}80"></div>
             <div style="min-width:0;flex:1">
               <div style="font-weight:700;font-size:12px;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e(s.title)}</div>
               <div style="font-family:monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--mut);margin-top:2px">
-                ${new Date(s.date).toLocaleDateString('en-US',{month:'short',day:'numeric'})}${gr ? ` · <span style="color:${gc}">${gr.score}/100</span>` : ''}
+                ${new Date(s.date).toLocaleDateString('en-US',{month:'short',day:'numeric'})}${gr?` · <span style="color:${gc}">${gr.score}/100</span>`:''}
               </div>
             </div>
             <span style="color:${uc};font-size:13px">→</span>
           </div>`;
         }).join('');
-        if (u.sessions.length > 5) cards += `<div style="font-size:10px;color:var(--mut);text-align:center;padding:4px 0;font-family:monospace">+${u.sessions.length-5} more</div>`;
+        if (u.sessions.length>5) cards+=`<div style="font-size:10px;color:var(--mut);text-align:center;padding:4px 0;font-family:monospace">+${u.sessions.length-5} more</div>`;
       } else {
         cards = `<div style="font-size:11px;color:var(--mut);text-align:center;padding:10px 0;font-style:italic">No sessions yet</div>`;
       }
@@ -1782,34 +1734,47 @@ function renderTrailHTML() {
     }
 
     // ── NODE CIRCLE ──
-    const nodeBg     = u.state === 'done'   ? uc : u.state === 'active' ? 'var(--card)' : 'var(--surf)';
-    const checkBadge = u.state === 'done'   ? `<div class="trail-badge check">✓</div>` : '';
+    const nodeBg     = u.state==='done' ? uc : u.state==='active' ? 'var(--card)' : 'var(--surf)';
+    const checkBadge = u.state==='done' ? `<div class="trail-badge check">✓</div>` : '';
 
-    nodesHTML += `
-      <div class="trail-node-bubble" id="trail-u-${u.id}"
-        style="left:${x}px;top:${y - 50}px;--uc:${uc}">
-        <div class="trail-node-circle ${u.state}"
-          style="background:${nodeBg};--uc:${uc}"
-          onclick="trailTapUnit(${u.id})">
-          <div class="trail-node-em">${u.em}</div>
-          <div class="trail-node-unit">U${u.id}</div>
-          ${checkBadge}
-        </div>
-        ${panelHTML}
-      </div>`;
+    nodesHTML += `<div class="trail-node-bubble" id="trail-u-${u.id}"
+      style="left:${x}px;top:${y-50}px;--uc:${uc}">
+      <div class="trail-node-circle ${u.state}"
+        style="background:${nodeBg};--uc:${uc}"
+        onclick="trailTapUnit(${u.id})">
+        <div class="trail-node-em">${u.em}</div>
+        <div class="trail-node-unit">U${u.id}</div>
+        ${checkBadge}
+      </div>
+      ${panelHTML}
+    </div>`;
 
-    // ── NODE LABEL — separate absolutely-positioned div, fully off the path ──
-    const labelColor   = u.state === 'locked' ? 'var(--mut)' : uc;
-    const labelSide    = left ? 'left' : 'right';
-    const lStyle       = labelStyle(x, y, labelSide, LWID, labelColor, 13, 800);
+    // ── NODE LABEL — separate div, FULLY OUTSIDE the path ──
+    // Left nodes: label sits LEFT of circle, right-aligned
+    // Right nodes: label sits RIGHT of circle, left-aligned
+    // No truncation — allow wrapping
+    const labelColor = u.state==='locked' ? 'var(--mut)' : uc;
 
-    // You-are-here: inline after label
-    const yahHTML = u.state === 'active'
-      ? `<div class="trail-yah" style="--uc:${uc};display:inline-flex;margin-top:5px;font-size:11px">📍 You are here</div>` : '';
+    let labelStyle;
+    if (left) {
+      // Right edge of label = x - R - LGAP
+      const rEdge = OUTER - (x - R - LGAP); // from right of OUTER
+      labelStyle = `position:absolute;right:${rEdge}px;left:0;
+        top:${y-36}px;width:${x-R-LGAP}px;
+        text-align:right;z-index:12;padding-right:4px;`;
+    } else {
+      // Left edge of label = x + R + LGAP
+      const lEdge = x + R + LGAP;
+      labelStyle = `position:absolute;left:${lEdge}px;right:0;
+        top:${y-36}px;width:${OUTER-lEdge}px;
+        text-align:left;z-index:12;padding-left:4px;`;
+    }
 
-    // Session dots: inline
+    const yahHTML = u.state==='active'
+      ? `<div class="trail-yah" style="--uc:${uc};margin-top:6px;font-size:11px">📍 You are here</div>` : '';
+
     const dotsHTML = u.sessions.length
-      ? `<div class="trail-dots" style="justify-content:${left?'flex-end':'flex-start'}">
+      ? `<div class="trail-dots" style="justify-content:${left?'flex-end':'flex-start'};margin-top:6px">
           ${u.sessions.slice(0,5).map(({s,i})=>
             `<div class="trail-dot" style="background:${uc};box-shadow:0 0 5px ${uc}60"
               onclick="event.stopPropagation();goStudy(${i})" title="${e(s.title)}"></div>`
@@ -1817,9 +1782,12 @@ function renderTrailHTML() {
           ${u.sessions.length>5?`<span style="font-family:monospace;font-size:9px;color:${uc}">+${u.sessions.length-5}</span>`:''}
         </div>` : '';
 
-    nodesHTML += `<div style="${lStyle}">
-      <div style="color:${labelColor}">${u.lbl}</div>
-      <div style="font-size:11px;color:var(--mut);margin-top:2px;font-weight:500">${u.ex} of exam</div>
+    nodesHTML += `<div style="${labelStyle}">
+      <div style="font-family:monospace;font-size:13px;font-weight:800;
+        letter-spacing:.3px;text-transform:uppercase;line-height:1.3;color:${labelColor};
+        word-break:break-word;">${u.lbl}</div>
+      <div style="font-family:monospace;font-size:11px;font-weight:500;
+        color:var(--mut);margin-top:3px;">${u.ex} of exam</div>
       ${yahHTML}
       ${dotsHTML}
     </div>`;
@@ -1827,10 +1795,12 @@ function renderTrailHTML() {
 
   // ── FINISH NODE ──
   const finLbl = allDone ? '✨ AP Exam Ready!' : `AP Macro · ${countdown().d} days`;
+  // Finish is at SVG center, translate to HTML space
+  const finX = SVG_OX + SVG_CX;
   nodesHTML += `
-    <div class="trail-finish-node" style="left:${CX}px;top:${finishY - 38}px">
+    <div class="trail-finish-node" style="left:${finX}px;top:${finishY-38}px">
       <div class="trail-finish-circle${allDone?' done':''}">
-        ${allDone ? '🏆' : '🎓'}
+        ${allDone?'🏆':'🎓'}
       </div>
       <div class="trail-finish-lbl" style="color:${allDone?'var(--accent)':'var(--mut)'}">
         ${finLbl}
@@ -1845,9 +1815,11 @@ function renderTrailHTML() {
   return `<div style="max-width:860px;margin:0 auto">
     <div class="page fadein" style="padding-bottom:5rem">
       ${progressBar}
-      <div class="trail-outer">
-        ${fullSVG}
-        ${nodesHTML}
+      <div class="trail-outer" style="overflow:visible;">
+        <div style="position:relative;width:${OUTER}px;max-width:100%;margin:0 auto;">
+          ${fullSVG}
+          ${nodesHTML}
+        </div>
       </div>
     </div>
   </div>`;
